@@ -1,7 +1,6 @@
 package com.eits.camera2_test;
 
 import static android.app.PendingIntent.getActivity;
-import static android.content.ContentValues.TAG;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -10,17 +9,15 @@ import androidx.core.content.ContextCompat;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+
+import android.content.RestrictionEntry;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
-import android.graphics.Camera;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
-import android.graphics.Point;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -39,13 +36,18 @@ import android.os.CountDownTimer;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.widget.CompoundButton;
 import android.widget.ImageView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -69,13 +71,22 @@ public class MainActivity extends AppCompatActivity {
     Boolean mIsRecording=false;
     File mVideoFolder;
     String mVideoFileName;
-
+    ArrayList<String>commandListStartRecord=new ArrayList<>();
+    ArrayList<String>commandListStopRecord=new ArrayList<>();
+    Switch switchMic;
+    public boolean isListening=false;
     CountDownTimer countDownTimer;
     File mImageFolder;
     String mImageFileName;
+    SpeechRecognizer mSpeechRecognizer;
+
+
+    SharedPreferences sharedPreferences;
+
 
     private static final int REQUEST_CAMERA_PERMISSION_RESULT=100;
     private static final int REQUEST_WRITE_EXTERNAL_STORAGE_PERMISSION_RESULT=200;
+    private static final int REQUEST_MIC_PERMISSION_RESULT=300;
 
     private static final int STATE_PREVIEW=0;
     private static final int STATE_WAIT_LOCK=1;
@@ -121,10 +132,9 @@ public class MainActivity extends AppCompatActivity {
                     e.printStackTrace();
                 }
 
-                  // Toast.makeText(MainActivity.this, String.valueOf(flashStatus), Toast.LENGTH_SHORT).show();
-                   startRecord();
-
-                   mMediaRecorder.start();
+                // Toast.makeText(MainActivity.this, String.valueOf(flashStatus), Toast.LENGTH_SHORT).show();
+                startRecord();
+                mMediaRecorder.start();
 
             }
             startPreview();
@@ -287,9 +297,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
 
-
         mTextureView = findViewById(R.id.textureView);
-
+        switchMic=findViewById(R.id.switch1);
         Text=findViewById(R.id.Text);
 
         mRecordImageButton=findViewById(R.id.recordBTN);
@@ -297,10 +306,19 @@ public class MainActivity extends AppCompatActivity {
         backBTN=findViewById(R.id.backBTN);
         flashBTN=findViewById(R.id.flashBTN);
 
+        commandListStartRecord.add("start recording");
+        commandListStartRecord.add("start");
+
+        commandListStopRecord.add("stop");
+        commandListStopRecord.add("stop recording");
+
         createVideoFolder();
         createImageFolder();
 
         mMediaRecorder=new MediaRecorder();
+
+        //createSpeechRecognizer();
+
 
         mRecordImageButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -338,35 +356,265 @@ public class MainActivity extends AppCompatActivity {
         });
 
 
-    flashBTN.setOnClickListener(new View.OnClickListener() {
-        @Override
-        public void onClick(View view)
-        {
-           if(flashStatus)
-           {
-               flashStatus=false;
-               flashBTN.setImageResource(R.drawable.ic_flash_off);
-           }else
-           {
-               flashStatus=true;
-               flashBTN.setImageResource(R.drawable.ic_flash_on);
-           }
+        flashBTN.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view)
+            {
+                if(flashStatus)
+                {
+                    flashStatus=false;
+                    flashBTN.setImageResource(R.drawable.ic_flash_off);
+                }else
+                {
+                    flashStatus=true;
+                    flashBTN.setImageResource(R.drawable.ic_flash_on);
+                }
 
-           if(mIsRecording)
-           {
-               try {
-                   toggleFlashModeRecord(flashStatus);
-               }catch (Exception e)
-               {
-                   Toast.makeText(MainActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
-               }
-           }else
-           {
-               toggleFlashMode(flashStatus);
-           }
+                if(mIsRecording)
+                {
+                    try {
+                        toggleFlashModeRecord(flashStatus);
+                    }catch (Exception e)
+                    {
+                        Toast.makeText(MainActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
+                    }
+                }else
+                {
+                    toggleFlashMode(flashStatus);
+                }
+
+            }
+        });
+    }
+
+//    private void SpeechRecognizationFunction() {
+//        if(isListening)
+//        {
+//            handleSpeechEnd();
+//        }
+//        else {
+//            handleSpeechBegin();
+//        }
+//    }
+
+    public Intent createIntent()
+    {
+        Intent intent= new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"en-IN");
+        return intent;
+
+
+    }
+    public void createSpeechRecognizer()
+    {
+        mSpeechRecognizer= SpeechRecognizer.createSpeechRecognizer(this);
+
+        mSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override
+            public void onReadyForSpeech(Bundle bundle) {
+
+            }
+
+            @Override
+            public void onBeginningOfSpeech() {
+                isListening = true;
+            }
+
+            @Override
+            public void onRmsChanged(float v) {
+
+            }
+
+            @Override
+            public void onBufferReceived(byte[] bytes) {
+
+            }
+
+            @Override
+            public void onEndOfSpeech() {
+               isListening=false;
+               mSpeechRecognizer.startListening(createIntent());
+            }
+
+            @Override
+            public void onError(int i) {
+                Log.e("TAG","onError");
+
+                String message;
+                switch (i) {
+                    case SpeechRecognizer.ERROR_AUDIO:
+                        message = "Audio recording error";
+                        break;
+                    case SpeechRecognizer.ERROR_CLIENT:
+                        message = "Client side error";
+                        isListening=false;
+                        createSpeechRecognizer();
+                        break;
+                    case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                        message = "Insufficient permissions";
+                        break;
+                    case SpeechRecognizer.ERROR_NETWORK:
+                        message = "Network error";
+                        break;
+                    case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                        message = "Network timeout";
+                        break;
+                    case SpeechRecognizer.ERROR_NO_MATCH:
+                        message = "No match";
+                        break;
+                    case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                        message = "RecognitionService busy";
+                        //isListening=false;
+                        break;
+                    case SpeechRecognizer.ERROR_SERVER:
+                        message = "error from server";
+                        break;
+                    case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                        message = "No speech input";
+                        break;
+                    default:
+                        message = "Didn't understand, please try again.";
+                        break;
+                }
+                Log.e("ErrorPrint",message);
+
+                if(!isListening)
+                {
+                    mSpeechRecognizer.startListening(createIntent());
+                }
+            }
+
+            @Override
+            public void onResults(Bundle bundle) {
+                ArrayList<String> matches=bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if(matches!=null && matches.size()>0)
+                {
+                    String command= matches.get(0);
+                    handleCommand(command);
+                }
+            }
+
+            @Override
+            public void onPartialResults(Bundle bundle) {
+                ArrayList<String> matches=bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if(matches!=null && matches.size()>0)
+                {
+                    String partialResult = matches.get(0);
+                    handleCommand(partialResult);
+                }
+            }
+
+            @Override
+            public void onEvent(int i, Bundle bundle) {
+
+            }
+        });
+    }
+
+//    public void handleSpeechBegin()
+//    {
+//        isListening=true;
+//        mSpeechRecognizer.startListening(createIntent());
+//        System.out.println("Mic on");
+//    }
+//    public void handleSpeechEnd()
+//    {
+//        isListening=false;
+//        mSpeechRecognizer.cancel();
+//        System.out.println("Mic off");
+//        // handleSpeechBegin();
+//        // mSpeechRecognizer.startListening(createIntent());
+//    }
+
+    public void handleCommand(String command)
+    {
+        //Toast.makeText(this, command, Toast.LENGTH_SHORT).show();
+
+        if(commandListStartRecord.contains(command))
+        {
+            if(switchMic.isChecked())
+            {
+                if(mIsRecording==false)
+                {
+                    Toast.makeText(this, "Recording Started", Toast.LENGTH_SHORT).show();
+
+                    mIsRecording=true;
+                    mRecordImageButton.setImageResource(R.drawable.record_resumed);
+                    try {
+                        createVideoFileName();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    startRecord();
+                    mMediaRecorder.start();
+                }
+            }
 
         }
-    });
+        else if(commandListStopRecord.contains(command))
+        {
+            if(switchMic.isChecked())
+            {
+                if(mIsRecording==true)
+                {
+                    Toast.makeText(this, "Recording Stopped", Toast.LENGTH_SHORT).show();
+
+                    mIsRecording=false;
+                    mRecordImageButton.setImageResource(R.drawable.record_paused);
+
+                    //toggleFlashModeRecord(flashStatus);
+
+                    mMediaRecorder.stop();
+                    mMediaRecorder.reset();
+                    startPreview();
+
+                }
+            }
+
+        }else
+        {
+           System.out.println(command);
+        }
+
+
+
+//        if(isListening==false)
+//        handleSpeechBegin();
+
+
+//        if(commandList.equals(command))
+//        {
+//            Toast.makeText(this, "11111111111111111111", Toast.LENGTH_SHORT).show();
+//        }else
+//        {
+//            Toast.makeText(this, "222222222222222", Toast.LENGTH_SHORT).show();
+//        }
+    }
+
+
+    private boolean checkVoicePermissions() {
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M)
+        {
+            if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==
+                    PackageManager.PERMISSION_GRANTED)
+            {
+                return true;
+            }else
+            {
+                if(shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO))
+                {
+                    Toast.makeText(this, "Please grant Mic Permission", Toast.LENGTH_SHORT).show();
+                }
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQUEST_MIC_PERMISSION_RESULT);
+            }
+        }else
+        {
+            Toast.makeText(this, "Permission Granted Already", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+        return false;
     }
 
     private void toggleFlashMode(boolean flashStatus) {
@@ -386,7 +634,7 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
     }
-////        }else
+    ////        }else
 ////        {
 ////            try {
 ////                if (flashStatus) {
@@ -420,13 +668,57 @@ public class MainActivity extends AppCompatActivity {
         }
 //
 //
-   }
+    }
 
     @Override
     protected void onResume() {
         super.onResume();
 
         startBackgroundThread();
+
+        createSpeechRecognizer();
+
+        sharedPreferences=getSharedPreferences("SwitchBtnValue",MODE_PRIVATE);
+        String btnCheck=sharedPreferences.getString("switch","");
+
+        if(btnCheck.equals("true"))
+        {
+            switchMic.setChecked(true);
+            mSpeechRecognizer.startListening(createIntent());
+        }else
+        {
+            //handleSpeechEnd();
+            switchMic.setChecked(false);
+            mSpeechRecognizer.stopListening();
+            mSpeechRecognizer.cancel();
+        }
+
+        switchMic.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
+                Toast.makeText(MainActivity.this, String.valueOf(b), Toast.LENGTH_SHORT).show();
+                if(b)
+                {
+                    mSpeechRecognizer.startListening(createIntent());
+
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putString("switch", "true");
+                    editor.apply();
+                }else
+                {
+//                  if(switchMic.isChecked()) {
+//                        handleSpeechEnd();
+                    mSpeechRecognizer.stopListening();
+                    mSpeechRecognizer.cancel();
+
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putString("switch", "false");
+                    editor.apply();
+//                    }
+                }
+            }
+        });
+
         if (mTextureView.isAvailable()) {
             setUpCamera(mTextureView.getWidth(), mTextureView.getHeight());
             connectCamera();
@@ -443,13 +735,13 @@ public class MainActivity extends AppCompatActivity {
         countDownTimer=new CountDownTimer(50000,1000) {
             @Override
             public void onTick(long l) {
-               int seconds = (int) (l / 1000);
+                int seconds = (int) (l / 1000);
                 Text.setText(String.valueOf(seconds));
             }
             @Override
             public void onFinish() {
-                 countDown();
-                 countDownTimer.start();
+                countDown();
+                countDownTimer.start();
             }
         };
     }
@@ -465,7 +757,7 @@ public class MainActivity extends AppCompatActivity {
             }
             if (grantResults[1]!=PackageManager.PERMISSION_GRANTED)
             {
-                Toast.makeText(this, "Grant Audio Permission", Toast.LENGTH_SHORT).show();
+                //Toast.makeText(this, "Grant Audio Permission", Toast.LENGTH_SHORT).show();
             }
         }
         if(requestCode==REQUEST_WRITE_EXTERNAL_STORAGE_PERMISSION_RESULT)
@@ -485,6 +777,17 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "App needs to Save Video Please Grant", Toast.LENGTH_SHORT).show();
             }
         }
+
+        if(requestCode==REQUEST_MIC_PERMISSION_RESULT)
+        {
+            if(grantResults[0]==PackageManager.PERMISSION_GRANTED)
+            {
+                Toast.makeText(this, "Permission Granted", Toast.LENGTH_SHORT).show();
+            }else
+            {
+                Toast.makeText(this, "Permission Denied", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     @Override
@@ -502,8 +805,17 @@ public class MainActivity extends AppCompatActivity {
         mRecordImageButton.setImageResource(R.drawable.record_paused);
         //toggleFlashModeRecord(flashStatus);
 
-        mMediaRecorder.stop();
-        mMediaRecorder.reset();
+        if (mSpeechRecognizer != null) {
+            mSpeechRecognizer.destroy();
+        }
+
+        try {
+            mMediaRecorder.stop();
+            mMediaRecorder.reset();
+        }catch (Exception e)
+        {
+
+        }
 //        Toast.makeText(this, mIsRecording.toString(), Toast.LENGTH_SHORT).show();
 
         flashStatus=false;
@@ -514,9 +826,6 @@ public class MainActivity extends AppCompatActivity {
         {
             flashBTN.setImageResource(R.drawable.ic_flash_off);
         }
-
-
-        Toast.makeText(this, String.valueOf(flashStatus), Toast.LENGTH_SHORT).show();
 
         CloseCamera();
     }
@@ -671,11 +980,11 @@ public class MainActivity extends AppCompatActivity {
                     (float) viewWidth / mPreviewSize.getWidth());
             matrix.postScale(scale, scale, centerX, centerY);
             matrix.postRotate(90 * (rotation - 2), centerX, centerY);
-           // matrix.postRotate(0,centerX,centerY);
+            // matrix.postRotate(0,centerX,centerY);
 
         }
         else if (Surface.ROTATION_180 == rotation) {
-           matrix.postRotate(180, centerX, centerY);
+            matrix.postRotate(180, centerX, centerY);
         }
 
         mTextureView.setTransform(matrix);
@@ -708,7 +1017,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void connectCamera() {
         CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-
         try {
             if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M)
             {
@@ -972,16 +1280,15 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-                    startRecord();
-                    mMediaRecorder.start();
-
+                startRecord();
+                mMediaRecorder.start();
             }else
             {
                 if(shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE))
                 {
                     Toast.makeText(this, "Please grant Video Permission", Toast.LENGTH_SHORT).show();
                 }
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE,Manifest.permission.READ_EXTERNAL_STORAGE},REQUEST_WRITE_EXTERNAL_STORAGE_PERMISSION_RESULT);
+                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},REQUEST_WRITE_EXTERNAL_STORAGE_PERMISSION_RESULT);
             }
         }else
         {
@@ -1000,16 +1307,16 @@ public class MainActivity extends AppCompatActivity {
     private void setUpMediaRecorder() throws IOException
     {
         mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+        //mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
 
 
         mMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         mMediaRecorder.setOutputFile(mVideoFileName);
         mMediaRecorder.setVideoEncodingBitRate(1000000);
-        mMediaRecorder.setVideoFrameRate(30);
+        //mMediaRecorder.setVideoFrameRate(30);
         mMediaRecorder.setVideoSize(mVideoSize.getWidth(),mVideoSize.getHeight());
         mMediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-        mMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        //mMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
         mMediaRecorder.prepare();
 
 
